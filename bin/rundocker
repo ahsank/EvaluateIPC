@@ -1,0 +1,39 @@
+#!/bin/bash
+
+opt="$1"
+case $opt in
+    --build)
+        BUILD=true
+        shift 1
+        ;;
+    --image)
+  	    IMG=$2
+	    shift 2
+	    ;;
+esac
+curdir=$(pwd)
+IMAGE=${IMG:-perftest}
+repodir="$(basename $curdir)"
+if [ -n "$BUILD" ];
+then
+    pushd "docker/cmake"
+    pwd
+   docker build -t $IMAGE .
+   popd
+   exit
+fi
+   
+mkdir -p /tmp/build_output/$repodir
+# Run cmake /src/workspace
+# Run cmake -DCMake_BUILD_TYPE=Debug /src/workspace
+
+
+docker run \
+  -ti \
+  -v $(pwd):/workspace \
+  -v /tmp/build_output/$repodir/$IMAGE:/build \
+  -w /build \
+  --rm \
+  $IMAGE:latest \
+  $*
+
