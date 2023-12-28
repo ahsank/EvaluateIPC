@@ -25,50 +25,54 @@
 #include <boost/asio/deadline_timer.hpp>
 #include "benchcommon.hpp"
 
-constexpr int qsize = 100;
-template <class T>
+template <class T, int qsize=100>
 class cond_queue {
 public:
-    std::vector<T> buff;
-    int pos = 0;
+    std::queue<T> buff;
     volatile bool closed = false;
     std::mutex m_mutex;
     std::condition_variable m_cv;
 
-    cond_queue(): buff(qsize) {}
+    cond_queue() {
+    }
     void add(T val) {
         {
             std::unique_lock<std::mutex> the_lock(m_mutex);
-            while (pos >= qsize) {
+            while (buff.size() >= qsize) {
                 m_cv.wait(the_lock, [this] {
-                    return pos < qsize;
+                    return buff.size() < qsize;
                 });
             }
-            buff[pos++] = std::move(val);
+            buff.push(std::move(val));
         }
         m_cv.notify_one();
     }
 
     void close() {
-        std::unique_lock<std::mutex> the_lock(m_mutex);
-        closed = true;
+        {
+            std::unique_lock<std::mutex> the_lock(m_mutex);
+            closed = true;
+        }
         m_cv.notify_all();
     }
     
     std::pair<T, bool> get() {
         T val;
-        bool is_closed;
+        bool is_closed = false;
         {
             std::unique_lock<std::mutex> the_lock(m_mutex);
-            while ( pos <= 0 && !closed) {
+            while ( buff.empty() && !closed) {
                 m_cv.wait(the_lock, [this] {
-                    return pos > 0 || closed;
+                    return !buff.empty() || closed;
                 });
             }
-            is_closed = closed;
-            if (pos > 0) {
-                val = std::move(buff[--pos]);
-            } 
+
+            if (!buff.empty()) {
+                val = std::move(buff.front());
+                buff.pop();
+            } else {
+                is_closed = closed;  
+            }
         }
         m_cv.notify_one();
         return std::make_pair(std::move(val), is_closed);
@@ -83,7 +87,7 @@ public:
     std::thread actor_thread;
 
     void start() {
-        auto actor_thread = std::thread([&] {
+        actor_thread = std::thread([&] {
             while (true) {
                 auto [task, closed] = cqueue.get();
                 if (closed) {
@@ -94,7 +98,7 @@ public:
         });
     }
 
-    void close() {
+    void stop() {
         cqueue.close();
         actor_thread.join();
     }
@@ -107,7 +111,38 @@ public:
     }
 };
 
-static void cache_calc_queue(cachetype& map,
+static void cache_calc_queue(CacheActor& actor,
+    std::chrono::microseconds sleep_time) {
+    actor.start();
+    std::vector<std::future<void>> futures;
+    for (int i=0; i < max_iter; i++) {
+        futures.push_back(std::async(std::launch::async,
+                [&actor, sleep_time] {
+                    actor.do_calc().wait();
+                    fake_io(sleep_time);
+                    actor.do_calc().wait();
+                }));
+    }
+    for(auto& f : futures) {
+        f.wait();
+    }
+    actor.stop();
+}
+
+
+static void BM_cachecalc_queue(benchmark::State& state) {
+    for (auto _ : state) {
+        CacheActor actor;
+        cache_calc_queue(actor, std::chrono::microseconds(state.range(0)));
+        checkWork(state, actor.cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(8, 64);
+
+// In this approach we send a function that does computation and
+// asynchronously executes simulated IO operation.
+static void cache_calc_approach2(cachetype& map,
     std::chrono::microseconds sleep_time) {
     cond_queue<std::function<void ()>> cqueue;
     
@@ -140,74 +175,20 @@ static void cache_calc_queue(cachetype& map,
     }
     cqueue.close();
     actor_thread.join();
-
-
 }
 
-static void BM_cachecalc_queue(benchmark::State& state) {
+static void BM_cachecalc_approach2(benchmark::State& state) {
     for (auto _ : state) {
         cachetype cache;
-        cache_calc_queue(cache,  std::chrono::microseconds(state.range(0)));
+        cache_calc_approach2(cache,  std::chrono::microseconds(state.range(0)));
         checkWork(state, cache);
     }
 }
 
-BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(8, 64);
-
-static void cache_calc_queue1(cachetype& cache,
-    std::chrono::microseconds sleep_time) {
-    using tasktype = std::packaged_task<void(cachetype&)>;
-    cond_queue<tasktype> cqueue;
-    
-    auto actor_thread = std::thread([&cqueue, &cache] {
-        while (true) {
-            auto [task, closed] = cqueue.get();
-            if (closed) {
-                break;
-            }
-            task(cache);
-        }
-    });
-
-    std::vector<std::future<void>> futures;
-    for (int i=0; i < max_iter; i++) {
-        futures.push_back(std::async(std::launch::async,
-                [&cqueue, sleep_time] {
-            {
-                tasktype calctask1(calc);
-                auto future1 = calctask1.get_future();
-                cqueue.add(std::move(calctask1));
-                future1.wait();
-            }
-            fake_io(sleep_time);
-            {
-                tasktype calctask2(calc);
-                auto future2 = calctask2.get_future();
-                cqueue.add(std::move(calctask2));
-                future2.wait();
-            }
-        }));
-    }
-    for(auto& f : futures) {
-        f.wait();
-    }
-    cqueue.close();
-    actor_thread.join();
-}
+BENCHMARK(BM_cachecalc_approach2)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 
-static void BM_cachecalc_queue1(benchmark::State& state) {
-    for (auto _ : state) {
-        cachetype cache;
-        cache_calc_queue1(cache,  std::chrono::microseconds(state.range(0)));
-        checkWork(state, cache);
-    }
-}
-
-BENCHMARK(BM_cachecalc_queue1)->Unit(benchmark::kMillisecond)->Range(8, 64);
-
-
-static void BM_cachecalc_threadpool(benchmark::State& state) {
+void BM_cachecalc_threadpool(benchmark::State& state) {
     boost::asio::thread_pool pool(num_tasks);
     boost::asio::thread_pool calcpool(1);
     auto strand_ = make_strand(calcpool.get_executor());
@@ -232,9 +213,6 @@ static void BM_cachecalc_threadpool(benchmark::State& state) {
             futures.push_back(task.get_future());
             boost::asio::post(pool, std::move(task));
         }
-        //for (auto& f: futures) {
-        //    f.wait();
-        //}
         boost::wait_for_all(futures.begin(), futures.end());
         checkWork(state, cache);
     }
@@ -242,8 +220,6 @@ static void BM_cachecalc_threadpool(benchmark::State& state) {
 
 BENCHMARK(BM_cachecalc_threadpool)->Unit(benchmark::kMillisecond)
 ->Range(8, 64);
-
-
 
 
 BENCHMARK_MAIN();
