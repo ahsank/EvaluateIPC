@@ -10,7 +10,7 @@ constexpr unsigned int num_tasks = 8;
 
 using cachetype = std::unordered_map<std::string, std::string>;
 const std::string cache_key = "hello";
-inline void fake_io (std::chrono::microseconds sleep_time=8us) {
+inline void fake_io (std::chrono::microseconds sleep_time) {
     std::this_thread::sleep_for(sleep_time);
 }
 
