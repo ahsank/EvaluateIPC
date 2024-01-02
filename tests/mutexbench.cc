@@ -114,4 +114,3 @@ BENCHMARK(BM_cachecalc_async)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 
 BENCHMARK_MAIN();
-

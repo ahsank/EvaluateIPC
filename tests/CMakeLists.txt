@@ -48,3 +48,4 @@ target_link_libraries(
 
 include(GoogleTest)
 
+add_subdirectory(seastar EXCLUDE_FROM_ALL)
