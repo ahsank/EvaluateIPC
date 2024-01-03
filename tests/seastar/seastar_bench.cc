@@ -28,7 +28,6 @@ static void BM_SeastarHash(benchmark::State& state) {
                     return seastar::make_ready_future<>();
                 }).then([sleep_time, f, nshard] {
                     return seastar::smp::submit_to(f % nshard, [sleep_time] {
-                        
                         return seastar::sleep(sleep_time);
                     });
                 }).then([&cache] {
@@ -43,15 +42,10 @@ static void BM_SeastarHash(benchmark::State& state) {
 }
 
 
-BENCHMARK(BM_SeastarHash)->Unit(benchmark::kMillisecond)->Range(8, 64);
+BENCHMARK(BM_SeastarHash)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
-// BENCHMARK(BM_SeastarHash);
-
-
-// BENCHMARK_MAIN();
 
 int main(int argc, char** argv) {
-    
     seastar::app_template app;
     app.run(argc, argv, [argc, argv] () {
         return seastar::async([&] {
@@ -60,7 +54,6 @@ int main(int argc, char** argv) {
             ::benchmark::Initialize(&ac, argv);
             ::benchmark::RunSpecifiedBenchmarks();
             std::cout << "done\n";
-            // return seastar::make_ready_future<>();
         });
     });
 }

@@ -138,7 +138,7 @@ static void BM_cachecalc_queue(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(8, 64);
+BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
 // In this approach we send a function that does computation and
 // asynchronously executes simulated IO operation.
@@ -185,7 +185,7 @@ static void BM_cachecalc_approach2(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc_approach2)->Unit(benchmark::kMillisecond)->Range(8, 64);
+BENCHMARK(BM_cachecalc_approach2)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
 
 void BM_cachecalc_threadpool(benchmark::State& state) {
@@ -219,7 +219,7 @@ void BM_cachecalc_threadpool(benchmark::State& state) {
 }
 
 BENCHMARK(BM_cachecalc_threadpool)->Unit(benchmark::kMillisecond)
-->Range(8, 64);
+->Range(0, 64);
 
 
 BENCHMARK_MAIN();

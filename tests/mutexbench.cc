@@ -39,7 +39,7 @@ static void BM_cachecalc(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc)->Unit(benchmark::kMillisecond)->Range(8, 64);
+BENCHMARK(BM_cachecalc)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
 
 static void cache_calc_mutex(cachetype& cache, std::mutex& m,
@@ -70,7 +70,7 @@ static void BM_cachecalc_mutex(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc_mutex)->Unit(benchmark::kMillisecond)->Range(8,64);
+BENCHMARK(BM_cachecalc_mutex)->Unit(benchmark::kMillisecond)->Range(0,64);
 
 
 static void cache_calc_async(cachetype& map,

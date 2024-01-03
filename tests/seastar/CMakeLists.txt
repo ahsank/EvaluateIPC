@@ -17,6 +17,7 @@ find_package (Seastar QUIET)
 #
 # ENDIF()
 
+set(CMAKE_CXX_STANDARD 23)
 enable_testing()
 
 IF ( Seastar_FOUND )
@@ -33,7 +34,23 @@ target_link_libraries(
   tests
 )
 
-ENDIF()
+add_executable(
+  seastar_test
+  seastar_test.cc
+)
+
+
+target_link_libraries(
+  seastar_test
+  PRIVATE Seastar::seastar
+  gtest_main
+  gmock_main
+)
+
 
 include(GoogleTest)
+
+gtest_discover_tests(seastar_test)
+
+ENDIF()
 
