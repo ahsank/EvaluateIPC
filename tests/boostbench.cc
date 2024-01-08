@@ -119,7 +119,7 @@ static void cache_calc_queue(CacheActor& actor,
         futures.push_back(std::async(std::launch::async,
                 [&actor, sleep_time] {
                     actor.do_calc().wait();
-                    fake_io(sleep_time);
+                    iotype::fake_io(sleep_time);
                     actor.do_calc().wait();
                 }));
     }
@@ -138,57 +138,57 @@ static void BM_cachecalc_queue(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(0, 64);
+BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 // In this approach we send a function that does computation and
 // asynchronously executes simulated IO operation.
-static void cache_calc_approach2(cachetype& map,
-    std::chrono::microseconds sleep_time) {
-    cond_queue<std::function<void ()>> cqueue;
+// static void cache_calc_approach2(cachetype& map,
+//     std::chrono::microseconds sleep_time) {
+//     cond_queue<std::function<void ()>> cqueue;
     
-    auto actor_thread = std::thread([&] {
-        std::queue<std::future<void>> futures;
-        while (true) {
-            auto [val, closed] = cqueue.get();
-            if (closed) {
-                break;
-            }
-            val();
-        }
-    });
-    std::vector<std::promise<void>> promises(max_iter);
-    for (int i=0; i < max_iter; i++) {
-        auto& prom=promises[i];
-        cqueue.add([&map, &cqueue, &prom, sleep_time] {
-            calc(map);
-            std::thread([&map, &prom, &cqueue, sleep_time] {
-                fake_io(sleep_time);
-                cqueue.add([&map, &prom] {
-                    calc(map);
-                    prom.set_value();
-                });
-            }).detach();
-        });
-    }
-    for(auto& p : promises) {
-        p.get_future().wait();
-    }
-    cqueue.close();
-    actor_thread.join();
-}
+//     auto actor_thread = std::thread([&] {
+//         std::queue<std::future<void>> futures;
+//         while (true) {
+//             auto [val, closed] = cqueue.get();
+//             if (closed) {
+//                 break;
+//             }
+//             val();
+//         }
+//     });
+//     std::vector<std::promise<void>> promises(max_iter);
+//     for (int i=0; i < max_iter; i++) {
+//         auto& prom=promises[i];
+//         cqueue.add([&map, &cqueue, &prom, sleep_time] {
+//             calc(map);
+//             std::thread([&map, &prom, &cqueue, sleep_time] {
+//                 iotype::fake_io(sleep_time);
+//                 cqueue.add([&map, &prom] {
+//                     calc(map);
+//                     prom.set_value();
+//                 });
+//             }).detach();
+//         });
+//     }
+//     for(auto& p : promises) {
+//         p.get_future().wait();
+//     }
+//     cqueue.close();
+//     actor_thread.join();
+// }
 
-static void BM_cachecalc_approach2(benchmark::State& state) {
-    for (auto _ : state) {
-        cachetype cache;
-        cache_calc_approach2(cache,  std::chrono::microseconds(state.range(0)));
-        checkWork(state, cache);
-    }
-}
+// static void BM_cachecalc_approach2(benchmark::State& state) {
+//     for (auto _ : state) {
+//         cachetype cache;
+//         cache_calc_approach2(cache,  std::chrono::microseconds(state.range(0)));
+//         checkWork(state, cache);
+//     }
+// }
 
-BENCHMARK(BM_cachecalc_approach2)->Unit(benchmark::kMillisecond)->Range(0, 64);
+// BENCHMARK(BM_cachecalc_approach2)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
 
-void BM_cachecalc_threadpool(benchmark::State& state) {
+void BM_cachecalc_boost_threadpool(benchmark::State& state) {
     boost::asio::thread_pool pool(num_tasks);
     boost::asio::thread_pool calcpool(1);
     auto strand_ = make_strand(calcpool.get_executor());
@@ -202,7 +202,7 @@ void BM_cachecalc_threadpool(benchmark::State& state) {
                 calc(cache);
             }));
             f.wait();
-            fake_io(sleep_time);
+            iotype::fake_io(sleep_time);
             auto f1 = boost::asio::post(strand_, std::packaged_task<void()>([&] {
                 calc(cache);
             }));
@@ -218,8 +218,8 @@ void BM_cachecalc_threadpool(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_cachecalc_threadpool)->Unit(benchmark::kMillisecond)
-->Range(0, 64);
+BENCHMARK(BM_cachecalc_boost_threadpool)->Unit(benchmark::kMillisecond)
+->Range(8, 64);
 
 
 BENCHMARK_MAIN();

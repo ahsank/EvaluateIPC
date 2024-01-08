@@ -20,15 +20,35 @@
 #include <boost/bind/bind.hpp>
 #include "benchcommon.hpp"
 
-static void cache_calc(cachetype& cache, std::chrono::microseconds sleep_time) {
+void BM_sleep(benchmark::State& state) {
+    auto duration = std::chrono::microseconds(state.range(0));
+    for (auto _ : state) {
+        sleep_io::fake_io(duration);
+    }
+}
+
+BENCHMARK(BM_sleep)->Unit(benchmark::kMicrosecond)->Range(8, 64);
+
+
+void BM_sleep_devzero(benchmark::State& state) {
+    auto duration = std::chrono::microseconds(state.range(0));
+    for (auto _ : state) {
+        iotype::fake_io(duration);
+    }
+}
+
+BENCHMARK(BM_sleep_devzero)->Unit(benchmark::kMicrosecond)->Range(8, 64);
+
+
+void cache_calc(cachetype& cache, std::chrono::microseconds sleep_time) {
     for (int i=0; i < max_iter; i++) {
         calc(cache);
-        fake_io(sleep_time);
+        iotype::fake_io(sleep_time);
         calc(cache);
     }
 }
 
-static void BM_cachecalc(benchmark::State& state) {
+void BM_cachecalc(benchmark::State& state) {
     for (auto _ : state) {
         cachetype cache;
         auto duration = std::chrono::microseconds(state.range(0));
@@ -42,14 +62,14 @@ static void BM_cachecalc(benchmark::State& state) {
 BENCHMARK(BM_cachecalc)->Unit(benchmark::kMillisecond)->Range(0, 64);
 
 
-static void cache_calc_mutex(cachetype& cache, std::mutex& m,
+void cache_calc_mutex(cachetype& cache, std::mutex& m,
     std::chrono::microseconds sleep_time) {
     for (int i=0; i < max_iter; i++) {
         {
             std::scoped_lock lck(m);
             calc(cache);
         }
-        fake_io(sleep_time);
+        iotype::fake_io(sleep_time);
         {
             std::scoped_lock lck(m);
             calc(cache);
@@ -57,7 +77,7 @@ static void cache_calc_mutex(cachetype& cache, std::mutex& m,
     }
 }
 
-static void BM_cachecalc_mutex(benchmark::State& state) {
+void BM_cachecalc_mutex(benchmark::State& state) {
     for (auto _ : state) {
         cachetype cache;
         std::mutex m;
@@ -73,7 +93,7 @@ static void BM_cachecalc_mutex(benchmark::State& state) {
 BENCHMARK(BM_cachecalc_mutex)->Unit(benchmark::kMillisecond)->Range(0,64);
 
 
-static void cache_calc_async(cachetype& map,
+void cache_calc_async(cachetype& map,
     std::chrono::microseconds sleep_time) {
     int i = 0;
     std::queue<std::future<void>> futures;
@@ -85,7 +105,7 @@ static void cache_calc_async(cachetype& map,
                 std::scoped_lock lck(m);
                 calc(map);
             }
-            fake_io(sleep_time);
+            iotype::fake_io(sleep_time);
             {
                 std::scoped_lock lck(m);
                 calc(map);
@@ -102,7 +122,7 @@ static void cache_calc_async(cachetype& map,
     }
 }
 
-static void BM_cachecalc_async(benchmark::State& state) {
+void BM_cachecalc_async(benchmark::State& state) {
     for (auto _ : state) {
         cachetype cache;
         cache_calc_async(cache,  std::chrono::microseconds(state.range(0)));

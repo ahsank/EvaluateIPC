@@ -2,6 +2,7 @@
 #include <string>
 #include <unordered_map>
 #include <chrono>
+#include <fstream>
 
 using namespace std::literals::chrono_literals;
 const unsigned int max_iter = 1000;
@@ -10,9 +11,11 @@ constexpr unsigned int num_tasks = 8;
 
 using cachetype = std::unordered_map<std::string, std::string>;
 const std::string cache_key = "hello";
-inline void fake_io (std::chrono::microseconds sleep_time) {
-    std::this_thread::sleep_for(sleep_time);
-}
+struct sleep_io {
+    static inline void fake_io (std::chrono::microseconds sleep_time) {
+        std::this_thread::sleep_for(sleep_time);
+    }
+};
 
 inline std::string get_key(int i) {return cache_key + std::to_string(i);}
 
@@ -42,3 +45,21 @@ inline void checkWork(benchmark::State& state, const cachetype& cache,
         }
     }
 }
+
+// More accurate sleep
+struct devzero_io {
+    static inline void fake_io(std::chrono::microseconds sleep_time) {
+        if (sleep_time <= 0us) return;
+        using clock =  std::chrono::steady_clock;
+        auto end_time = clock::now() + sleep_time;
+        std::ifstream zfs("/dev/zero");
+        const int readsize = 1024;
+        char v[readsize];
+        while ( clock::now() < end_time) {
+            zfs.read(v, readsize);
+        }
+        zfs.close();
+    }
+};
+
+using iotype = devzero_io;

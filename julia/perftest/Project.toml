@@ -1,0 +1,4 @@
+name = "perftest"
+uuid = "e26eada9-a410-495e-8319-4bd38afa225c"
+authors = ["Ahsan Khan <ahsankhanmail@gmail.com>"]
+version = "0.1.0"

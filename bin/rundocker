@@ -34,6 +34,6 @@ docker run \
   -v /tmp/build_output/$repodir/$IMAGE:/build \
   -w /build \
   --rm \
-  $IMAGE:latest \
-  $*
+  $* \
+  $IMAGE:latest
 
