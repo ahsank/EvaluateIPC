@@ -5,17 +5,16 @@
 #include <memory>
 #include <mutex>
 #include <array>
-#include <benchmark/benchmark.h>
 #include <iostream>
 #include <ranges>
 #include <execution>
-#include <thread>
 #include <future>
 #include <sstream>
 #include <math.h>
 #include <iomanip>
 #include <vector>
 #include <queue>
+#include <semaphore>
 #include <boost/lockfree/spsc_queue.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/thread_pool.hpp>
@@ -31,21 +30,20 @@ public:
     std::queue<T> buff;
     volatile bool closed = false;
     std::mutex m_mutex;
-    std::condition_variable m_cv;
+    std::condition_variable cvnotempty;
+    std::condition_variable cvnotfull;
 
     cond_queue() {
     }
     void add(T val) {
         {
             std::unique_lock<std::mutex> the_lock(m_mutex);
-            while (buff.size() >= qsize) {
-                m_cv.wait(the_lock, [this] {
-                    return buff.size() < qsize;
-                });
-            }
+            cvnotfull.wait(the_lock, [this] {
+                return buff.size() < qsize;
+            });
             buff.push(std::move(val));
         }
-        m_cv.notify_one();
+        cvnotempty.notify_one();
     }
 
     void close() {
@@ -53,31 +51,34 @@ public:
             std::unique_lock<std::mutex> the_lock(m_mutex);
             closed = true;
         }
-        m_cv.notify_all();
+        cvnotempty.notify_all();
     }
     
     std::pair<T, bool> get() {
         T val;
         bool is_closed = false;
+        bool popped = false;
         {
             std::unique_lock<std::mutex> the_lock(m_mutex);
-            while ( buff.empty() && !closed) {
-                m_cv.wait(the_lock, [this] {
-                    return !buff.empty() || closed;
-                });
-            }
+            cvnotempty.wait(the_lock, [this] {
+                return !buff.empty() || closed;
+            });
 
             if (!buff.empty()) {
                 val = std::move(buff.front());
                 buff.pop();
+                popped = true;
             } else {
                 is_closed = closed;  
             }
         }
-        m_cv.notify_one();
+        if (popped) {
+            cvnotfull.notify_one();
+        }
         return std::make_pair(std::move(val), is_closed);
     }
 };
+
 
 class CacheActor {
 public:
@@ -139,6 +140,123 @@ static void BM_cachecalc_queue(benchmark::State& state) {
 }
 
 BENCHMARK(BM_cachecalc_queue)->Unit(benchmark::kMillisecond)->Range(8, 64);
+
+// Implementatio of the above queue using semaphore
+// Not mentioned in benchmark as it had worse performance. Also some decision
+// like closing the queue needs more thought
+template <class T, int qsize=100>
+class sem_queue {
+public:
+    std::queue<T> buff;
+    volatile bool closed = false;
+    std::mutex m_mutex;
+    std::counting_semaphore<qsize> has_space{qsize};
+    std::counting_semaphore<qsize> has_elem{0};
+
+    sem_queue() {
+    }
+    
+    void add(T val) {
+        has_space.acquire();
+        {
+            std::scoped_lock<std::mutex> the_lock(m_mutex);
+            buff.push(std::move(val));
+        }
+        has_elem.release();
+    }
+
+    void close() {
+        has_space.acquire();
+        {
+            std::scoped_lock<std::mutex> the_lock(m_mutex);
+            closed = true;
+        }
+        // Behave like adding an element to wake up consumer thread
+        has_elem.release();
+    }
+    
+    std::pair<T, bool> get() {
+        T val;
+        bool is_closed = false;
+        bool is_removed = false;
+        has_elem.acquire();
+        {
+            std::scoped_lock<std::mutex> the_lock(m_mutex);
+            
+            if (closed) {
+                is_closed = closed;
+            } else {
+                val = std::move(buff.front());
+                buff.pop();
+                is_removed = true;
+            }
+        }
+        if (is_removed) has_space.release();
+        return std::make_pair(std::move(val), is_closed);
+    }
+};
+
+class SemCacheActor {
+public:
+    cachetype cache;
+    using tasktype = std::packaged_task<void(cachetype&)>;
+    sem_queue<tasktype> cqueue;
+    std::thread actor_thread;
+
+    void start() {
+        actor_thread = std::thread([&] {
+            while (true) {
+                auto [task, closed] = cqueue.get();
+                if (closed) {
+                    break;
+                }
+                task(cache);
+            }
+        });
+    }
+
+    void stop() {
+        cqueue.close();
+        actor_thread.join();
+    }
+
+    std::future<void> do_calc() {
+        tasktype calctask(calc);
+        auto fut = calctask.get_future();
+        cqueue.add(std::move(calctask));
+        return fut;
+    }
+};
+
+// Implementation of our task sequence using semaphore
+void cache_calc_semqueue(SemCacheActor& actor,
+    std::chrono::microseconds sleep_time) {
+    actor.start();
+    std::vector<std::future<void>> futures;
+    for (int i=0; i < max_iter; i++) {
+        futures.push_back(std::async(std::launch::async,
+                [&actor, sleep_time] {
+                    actor.do_calc().wait();
+                    iotype::fake_io(sleep_time);
+                    actor.do_calc().wait();
+                }));
+    }
+    for(auto& f : futures) {
+        f.wait();
+    }
+    actor.stop();
+}
+
+
+static void BM_cachecalc_semqueue(benchmark::State& state) {
+    for (auto _ : state) {
+        SemCacheActor actor;
+        cache_calc_semqueue(actor, std::chrono::microseconds(state.range(0)));
+        checkWork(state, actor.cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_semqueue)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 // In this approach we send a function that does computation and
 // asynchronously executes simulated IO operation.

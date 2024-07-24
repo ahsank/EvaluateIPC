@@ -109,6 +109,9 @@ end
 
 function cachecalc_channel()
     calcch = Channel{Boolean}(100, spawn=true) do ch
-        
+        for i ∈ 1::maxiter
+            put!(ch, true)
+        end
     end
+    
 end

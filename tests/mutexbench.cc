@@ -49,21 +49,19 @@ void cache_calc(cachetype& cache, std::chrono::microseconds sleep_time) {
 }
 
 void BM_cachecalc(benchmark::State& state) {
+    auto duration = std::chrono::microseconds(state.range(0));
     for (auto _ : state) {
         cachetype cache;
-        auto duration = std::chrono::microseconds(state.range(0));
-        std::async(std::launch::async, [&cache, duration] {
-            cache_calc(cache, duration);
-        }).wait();
+        cache_calc(cache, duration);
         checkWork(state, cache);
     }
 }
 
-BENCHMARK(BM_cachecalc)->Unit(benchmark::kMillisecond)->Range(0, 64);
+BENCHMARK(BM_cachecalc)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 
-void cache_calc_mutex(cachetype& cache, std::mutex& m,
-    std::chrono::microseconds sleep_time) {
+void cache_calc_mutex(cachetype& cache, std::chrono::microseconds sleep_time) {
+    std::mutex m;
     for (int i=0; i < max_iter; i++) {
         {
             std::scoped_lock lck(m);
@@ -78,19 +76,15 @@ void cache_calc_mutex(cachetype& cache, std::mutex& m,
 }
 
 void BM_cachecalc_mutex(benchmark::State& state) {
+    auto duration = std::chrono::microseconds(state.range(0));
     for (auto _ : state) {
         cachetype cache;
-        std::mutex m;
-        auto duration = std::chrono::microseconds(state.range(0));
-
-        std::async(std::launch::async, [&] {
-            cache_calc_mutex(cache, m, duration);
-        }).wait();
+        cache_calc_mutex(cache, duration);
         checkWork(state, cache);
     }
 }
 
-BENCHMARK(BM_cachecalc_mutex)->Unit(benchmark::kMillisecond)->Range(0,64);
+BENCHMARK(BM_cachecalc_mutex)->Unit(benchmark::kMillisecond)->Range(8,64);
 
 
 void cache_calc_async(cachetype& map,
@@ -111,6 +105,7 @@ void cache_calc_async(cachetype& map,
                 calc(map);
             }
         }));
+        // Make sure no more parallel tasks than num_tasks
         while (futures.size() >= num_tasks) {
             futures.front().wait();
             futures.pop();

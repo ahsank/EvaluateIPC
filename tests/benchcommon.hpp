@@ -3,11 +3,15 @@
 #include <unordered_map>
 #include <chrono>
 #include <fstream>
+#include <thread>
+#include <benchmark/benchmark.h>
+
 
 using namespace std::literals::chrono_literals;
 const unsigned int max_iter = 1000;
 const unsigned int num_calc = 10;
 constexpr unsigned int num_tasks = 8;
+constexpr int start_val = 10000;
 
 using cachetype = std::unordered_map<std::string, std::string>;
 const std::string cache_key = "hello";
@@ -24,8 +28,9 @@ inline void calc(cachetype& cache) {
     for (int i=0; i < num_calc; i++) {
         auto key = get_key(i);
         auto str = cache[key];
+        // converts to int, increments and converts back to string
         cache[key] = str.length() == 0 ?
-            "1" : std::to_string(std::stoi(str) + 1);
+            std::to_string(start_val+1) : std::to_string(std::stoi(str) + 1);
     }
 }
 
@@ -35,8 +40,12 @@ template <typename T> void log_error(benchmark::State& state, T result, T check)
     state.SkipWithError(os.str());
  
 }
+
+// Check that there was no race condtion. The final value in the hash table
+// should be start_val + iterations * 2
 inline void checkWork(benchmark::State& state, const cachetype& cache,
-    unsigned check_val = max_iter*2) {
+    unsigned iter = max_iter) {
+    auto check_val = start_val + iter * 2;
     const auto str_check =  std::to_string(check_val);
     for (int i=0; i < num_calc; i++) {
         auto str = cache.at(get_key(i));

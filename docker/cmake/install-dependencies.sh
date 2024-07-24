@@ -32,8 +32,9 @@ apt-get install -y ninja-build \
     openssl \
     pkg-config \
     libprotobuf-dev \
-    protobuf-compiler
-    
+    protobuf-compiler \
+    libdouble-conversion-dev
+
 apt-get install -y \
                     git \
                     curl \
