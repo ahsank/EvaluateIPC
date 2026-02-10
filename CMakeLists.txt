@@ -20,6 +20,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "-std=c++23 -fcoroutines")
 enable_testing()
 
-add_subdirectory(folly)
+# Optional components
+option(ENABLE_FOLLY "Build with Folly support" OFF)
+
+if(ENABLE_FOLLY)
+  add_subdirectory(folly)
+endif()
+
 add_subdirectory(src)
 add_subdirectory(tests)

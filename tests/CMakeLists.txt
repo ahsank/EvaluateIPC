@@ -30,17 +30,18 @@ target_link_libraries(
   benchmark::benchmark
 )
 
-add_executable(
-  follybench
-  follybench.cc
-)
+if(ENABLE_FOLLY)
+  add_executable(
+    follybench
+    follybench.cc
+  )
 
-target_link_libraries(
-  follybench
-  Folly::folly
-  benchmark::benchmark
-)
-
+  target_link_libraries(
+    follybench
+    Folly::folly
+    benchmark::benchmark
+  )
+endif()
 
 FIND_PACKAGE( Boost  COMPONENTS program_options  thread system REQUIRED )
 INCLUDE_DIRECTORIES( ${Boost_INCLUDE_DIR} )
