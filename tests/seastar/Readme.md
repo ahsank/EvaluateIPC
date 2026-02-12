@@ -7,7 +7,12 @@ Then install `seastar` by
 
 ```console
 # cd /
-# git clone --depth 1  https://github.com/scylladb/seastar.git
+# Clone a specific release branch (e.g., seastar-17.05-branch)
+# git clone --depth 1 --branch seastar-17.05-branch https://github.com/scylladb/seastar.git
+# Or clone a specific release tag (e.g., seastar-24.1.0)
+# git clone --depth 1 --branch seastar-24.1.0 https://github.com/scylladb/seastar.git
+# Or clone the latest main branch
+# git clone --depth 1 https://github.com/scylladb/seastar.git
 # cd /seastar/
 # ./install-dependencies.sh
 # ./configure.py --mode=release

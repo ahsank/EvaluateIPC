@@ -1,6 +1,7 @@
 #include <coroutine>
 #include <folly/init/Init.h>
 #include <folly/experimental/coro/Task.h>
+#include <folly/experimental/coro/Collect.h>
 #include <folly/executors/StrandExecutor.h>
 #include <folly/executors/ManualExecutor.h>
 #include <folly/experimental/coro/BlockingWait.h>
@@ -41,13 +42,6 @@ private:
         if (real_duration < sleep_time) {
             throw std::runtime_error("Sleep not working");
         }
-        // Other instances of someMethod() calls will be able to run
-        // while this coroutine is suspended waiting for an RPC call
-        // to complete.
-        // co_await getClient()->co_someRpcCall();
-
-       // When that call resumes, this coroutine is once again
-       // executing with mutual exclusion.
         modify(otherState_);
         co_return otherState_;
     }
@@ -75,7 +69,53 @@ void BM_cachecalc_folly_threadpool(benchmark::State& state) {
     }
     
 }
-BENCHMARK(BM_cachecalc_folly_threadpool)->Unit(benchmark::kMillisecond)->Range(0, 64);;
+BENCHMARK(BM_cachecalc_folly_threadpool)->Unit(benchmark::kMillisecond)->Range(0, 64);
+
+// Benchmark similar to BM_cachecalc_boost_threadpool that runs max_iter tasks
+void BM_cachecalc_folly_parallel(benchmark::State& state) {
+    std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
+    
+    for (auto _ : state) {
+        cachetype cache;
+        auto strand_ = StrandContext::create();
+        auto currentEx = folly::getGlobalCPUExecutor().get();
+        auto strandExPtr = std::make_shared<folly::Executor::KeepAlive<>>(
+            folly::StrandExecutor::create(strand_, currentEx));
+        
+        auto runTask = [&cache, sleep_time, strandExPtr]() -> folly::coro::Task<void> {
+            // First calc with strand serialization
+            co_await folly::coro::co_invoke([&cache]() -> folly::coro::Task<void> {
+                calc(cache);
+                co_return;
+            }).scheduleOn(*strandExPtr);
+            
+            // Simulated IO
+            co_await sleepTask(sleep_time);
+            
+            // Second calc with strand serialization
+            co_await folly::coro::co_invoke([&cache]() -> folly::coro::Task<void> {
+                calc(cache);
+                co_return;
+            }).scheduleOn(*strandExPtr);
+        };
+        
+        auto runAllTasks = [&runTask]() -> folly::coro::Task<void> {
+            std::vector<folly::coro::Task<void>> tasks;
+            tasks.reserve(max_iter);
+            
+            for (int i = 0; i < max_iter; i++) {
+                tasks.push_back(runTask());
+            }
+            
+            co_await folly::coro::collectAllRange(std::move(tasks));
+        };
+        
+        folly::coro::blockingWait(runAllTasks().scheduleOn(currentEx));
+        checkWork(state, cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_folly_parallel)->Unit(benchmark::kMillisecond)->Range(8, 64);
 
 // BENCHMARK_MAIN();
 

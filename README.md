@@ -1,5 +1,15 @@
 To run benchmarks
 
+In your desktop
+===============
+
+Go to root folder
+
+```console
+cmake -B build -DENABLE_FOLLY=ON
+cmake --build build
+```
+
 Using docker
 ============
 
@@ -50,6 +60,9 @@ Folly benchmark
 ===============
 
 ```console
+sudo apt install libfast-float-dev
+cmake -B build -DENABLE_FOLLY=ON /workspace
+cmake --build build
 /build# ./tests/follybench 
 2024-07-24T21:20:05+00:00
 Running ./tests/follybench
@@ -94,3 +107,9 @@ BM_SeastarHash/64       1.23 ms         1.23 ms          569
 done
 ```
 
+## Debugging
+Before debugging in gdb run following commands to avoid verbose log
+
+```
+set print thread-events off
+```

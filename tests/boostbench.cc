@@ -358,35 +358,32 @@ void BM_cachecalc_boost_coroutine(benchmark::State& state) {
         std::promise<void> all_done;
         auto done_future = all_done.get_future();
         
-        // Task coroutine
+        // Task coroutine - use async dispatch instead of blocking
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
-            // First calc on strand
-            co_await boost::asio::co_spawn(
-                strand_,
-                [&]() -> boost::asio::awaitable<void> {
-                    calc(cache);
-                    co_return;
-                },
-                boost::asio::use_awaitable
+            // First calc on strand using async dispatch
+            co_await boost::asio::dispatch(
+                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
             );
+            calc(cache);
             
-            // Simulated IO
+            // Return to pool for IO
+            auto pool_ex = co_await boost::asio::this_coro::executor;
+            co_await boost::asio::dispatch(boost::asio::use_awaitable);
+            
+            // Simulated IO on pool thread
             iotype::fake_io(sleep_time);
             
             // Second calc on strand
-            co_await boost::asio::co_spawn(
-                strand_,
-                [&]() -> boost::asio::awaitable<void> {
-                    calc(cache);
-                    co_return;
-                },
-                boost::asio::use_awaitable
+            co_await boost::asio::dispatch(
+                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
             );
+            calc(cache);
             
             // Track completion
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
                 all_done.set_value();
             }
+            co_return;
         };
         
         // Spawn all tasks
