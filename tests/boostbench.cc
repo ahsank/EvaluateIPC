@@ -19,9 +19,14 @@
 #include <boost/asio.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/awaitable.hpp>
 #include <boost/thread/future.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include "benchcommon.hpp"
 
 template <class T, int qsize=100>
@@ -337,6 +342,71 @@ void BM_cachecalc_boost_threadpool(benchmark::State& state) {
 }
 
 BENCHMARK(BM_cachecalc_boost_threadpool)->Unit(benchmark::kMillisecond)
+->Range(8, 64);
+
+
+// Coroutine-based benchmark using Boost.Asio - optimized version
+void BM_cachecalc_boost_coroutine(benchmark::State& state) {
+    std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
+    
+    for (auto _ : state) {
+        boost::asio::thread_pool pool(num_tasks);
+        boost::asio::thread_pool calcpool(1);
+        auto strand_ = make_strand(calcpool.get_executor());
+        cachetype cache;
+        std::atomic<int> completed{0};
+        std::promise<void> all_done;
+        auto done_future = all_done.get_future();
+        
+        // Task coroutine
+        auto task_coro = [&]() -> boost::asio::awaitable<void> {
+            // First calc on strand
+            co_await boost::asio::co_spawn(
+                strand_,
+                [&]() -> boost::asio::awaitable<void> {
+                    calc(cache);
+                    co_return;
+                },
+                boost::asio::use_awaitable
+            );
+            
+            // Simulated IO
+            iotype::fake_io(sleep_time);
+            
+            // Second calc on strand
+            co_await boost::asio::co_spawn(
+                strand_,
+                [&]() -> boost::asio::awaitable<void> {
+                    calc(cache);
+                    co_return;
+                },
+                boost::asio::use_awaitable
+            );
+            
+            // Track completion
+            if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
+                all_done.set_value();
+            }
+        };
+        
+        // Spawn all tasks
+        for (int i = 0; i < max_iter; i++) {
+            boost::asio::co_spawn(pool, task_coro(), boost::asio::detached);
+        }
+        
+        // Wait for all tasks to complete
+        done_future.wait();
+        
+        pool.stop();
+        calcpool.stop();
+        pool.join();
+        calcpool.join();
+        
+        checkWork(state, cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_boost_coroutine)->Unit(benchmark::kMillisecond)
 ->Range(8, 64);
 
 
