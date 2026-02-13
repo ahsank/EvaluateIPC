@@ -345,62 +345,58 @@ BENCHMARK(BM_cachecalc_boost_threadpool)->Unit(benchmark::kMillisecond)
 ->Range(8, 64);
 
 
-// Coroutine-based benchmark using Boost.Asio - optimized version
 void BM_cachecalc_boost_coroutine(benchmark::State& state) {
-    std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
+    const std::chrono::microseconds sleep_time(state.range(0));
     
+    // Move pool creation outside the measurement loop to avoid thread spawn overhead
+    boost::asio::thread_pool pool(num_tasks);
+    boost::asio::thread_pool calcpool(1); // Dedicated pool for serialized work
+    auto strand_ = boost::asio::make_strand(calcpool.get_executor());
+
     for (auto _ : state) {
-        boost::asio::thread_pool pool(num_tasks);
-        boost::asio::thread_pool calcpool(1);
-        auto strand_ = make_strand(calcpool.get_executor());
         cachetype cache;
         std::atomic<int> completed{0};
         std::promise<void> all_done;
         auto done_future = all_done.get_future();
-        
-        // Task coroutine - use async dispatch instead of blocking
+
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
-            // First calc on strand using async dispatch
+            auto executor = co_await boost::asio::this_coro::executor;
+
+            // 1. Serialized calculation on strand
             co_await boost::asio::dispatch(
                 boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
             );
             calc(cache);
-            
-            // Return to pool for IO
-            auto pool_ex = co_await boost::asio::this_coro::executor;
-            co_await boost::asio::dispatch(boost::asio::use_awaitable);
-            
-            // Simulated IO on pool thread
-            iotype::fake_io(sleep_time);
-            
-            // Second calc on strand
+
+            // 2. Non-blocking simulated IO (matching Folly's behavior)
+            // Use a timer to yield the thread instead of busy-waiting
+            boost::asio::steady_timer timer(executor, sleep_time);
+            co_await timer.async_wait(boost::asio::use_awaitable);
+
+            // 3. Second serialized calculation on strand
             co_await boost::asio::dispatch(
                 boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
             );
             calc(cache);
-            
-            // Track completion
+
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
                 all_done.set_value();
             }
             co_return;
         };
-        
-        // Spawn all tasks
+
         for (int i = 0; i < max_iter; i++) {
             boost::asio::co_spawn(pool, task_coro(), boost::asio::detached);
         }
-        
-        // Wait for all tasks to complete
+
         done_future.wait();
-        
-        pool.stop();
-        calcpool.stop();
-        pool.join();
-        calcpool.join();
-        
         checkWork(state, cache);
     }
+    
+    pool.stop();
+    calcpool.stop();
+    pool.join();
+    calcpool.join();
 }
 
 BENCHMARK(BM_cachecalc_boost_coroutine)->Unit(benchmark::kMillisecond)
