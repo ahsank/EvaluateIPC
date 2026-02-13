@@ -350,7 +350,7 @@ BENCHMARK(BM_cachecalc_boost_threadpool)->Unit(benchmark::kMillisecond)
 
 void BM_cachecalc_boost_coroutine(benchmark::State& state) {
     std::chrono::microseconds sleep_time(state.range(0));
-    
+
     // 1. Move pools outside the measurement loop to avoid creation/join overhead.
     boost::asio::thread_pool pool(num_tasks);
     auto main_executor = pool.get_executor();
@@ -361,31 +361,40 @@ void BM_cachecalc_boost_coroutine(benchmark::State& state) {
         std::atomic<int> completed{0};
         std::promise<void> all_done;
         auto done_future = all_done.get_future();
-    
-        // Create a coroutine lambda from calc function
-        auto calc_coro = [&cache] () -> boost::asio::awaitable<void> {
-            calc(cache);
-            co_return;
-        };
 
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
-            // 2. Move to strand for serialized calculation.
-            co_await co_spawn (strand_, calc_coro(), boost::asio::use_awaitable);
-            // exectute sleep task in the main executor to avoid serializing the sleep operation. This allows other tasks to run while one is sleeping.
-            boost::asio::steady_timer timer(main_executor, sleep_time);
-            co_await timer.async_wait(boost::asio::use_awaitable);
-            co_await co_spawn (strand_, calc_coro(), boost::asio::use_awaitable);
+            // Switch execution context to the strand for serialized work
+            // This avoids the overhead of co_spawn (new coroutine allocation)
+            co_await boost::asio::dispatch(
+                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
+            );
+            calc(cache);
+
+            // Return to main executor for IO to avoid serializing the wait
+            co_await boost::asio::dispatch(
+                boost::asio::bind_executor(main_executor, boost::asio::use_awaitable)
+            );
+
+            // Use an individual timer to simulate independent IO tasks
+            boost::asio::steady_timer individual_timer(main_executor, sleep_time);
+            co_await individual_timer.async_wait(boost::asio::use_awaitable);
+
+            // Re-enter strand for the final serialized calculation
+            co_await boost::asio::dispatch(
+                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
+            );
+            calc(cache);
 
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
                 all_done.set_value();
             }
             co_return;
         };
-        
+
         for (int i = 0; i < max_iter; i++) {
             boost::asio::co_spawn(main_executor, task_coro(), boost::asio::detached);
         }
-        
+
         done_future.wait();
         checkWork(state, cache);
     }
