@@ -325,7 +325,10 @@ void BM_cachecalc_boost_threadpool(benchmark::State& state) {
                 calc(cache);
             }));
             f.wait();
-            iotype::fake_io(sleep_time);
+            // iotype::fake_io(sleep_time); // Don't use it is not optimized for boost
+            // Use boost asio timer to simulate sleep instead of blocking the thread. This allows other tasks to run while one is sleeping.
+            boost::asio::steady_timer timer(pool.get_executor(), sleep_time);
+            timer.wait();
             auto f1 = boost::asio::post(strand_, std::packaged_task<void()>([&] {
                 calc(cache);
             }));
@@ -346,57 +349,49 @@ BENCHMARK(BM_cachecalc_boost_threadpool)->Unit(benchmark::kMillisecond)
 
 
 void BM_cachecalc_boost_coroutine(benchmark::State& state) {
-    const std::chrono::microseconds sleep_time(state.range(0));
+    std::chrono::microseconds sleep_time(state.range(0));
     
-    // Move pool creation outside the measurement loop to avoid thread spawn overhead
+    // 1. Move pools outside the measurement loop to avoid creation/join overhead.
     boost::asio::thread_pool pool(num_tasks);
-    boost::asio::thread_pool calcpool(1); // Dedicated pool for serialized work
-    auto strand_ = boost::asio::make_strand(calcpool.get_executor());
+    auto main_executor = pool.get_executor();
+    auto strand_ = boost::asio::make_strand(main_executor);
 
     for (auto _ : state) {
         cachetype cache;
         std::atomic<int> completed{0};
         std::promise<void> all_done;
         auto done_future = all_done.get_future();
+    
+        // Create a coroutine lambda from calc function
+        auto calc_coro = [&cache] () -> boost::asio::awaitable<void> {
+            calc(cache);
+            co_return;
+        };
 
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
-            auto executor = co_await boost::asio::this_coro::executor;
-
-            // 1. Serialized calculation on strand
-            co_await boost::asio::dispatch(
-                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
-            );
-            calc(cache);
-
-            // 2. Non-blocking simulated IO (matching Folly's behavior)
-            // Use a timer to yield the thread instead of busy-waiting
-            boost::asio::steady_timer timer(executor, sleep_time);
+            // 2. Move to strand for serialized calculation.
+            co_await co_spawn (strand_, calc_coro(), boost::asio::use_awaitable);
+            // exectute sleep task in the main executor to avoid serializing the sleep operation. This allows other tasks to run while one is sleeping.
+            boost::asio::steady_timer timer(main_executor, sleep_time);
             co_await timer.async_wait(boost::asio::use_awaitable);
-
-            // 3. Second serialized calculation on strand
-            co_await boost::asio::dispatch(
-                boost::asio::bind_executor(strand_, boost::asio::use_awaitable)
-            );
-            calc(cache);
+            co_await co_spawn (strand_, calc_coro(), boost::asio::use_awaitable);
 
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
                 all_done.set_value();
             }
             co_return;
         };
-
+        
         for (int i = 0; i < max_iter; i++) {
-            boost::asio::co_spawn(pool, task_coro(), boost::asio::detached);
+            boost::asio::co_spawn(main_executor, task_coro(), boost::asio::detached);
         }
-
+        
         done_future.wait();
         checkWork(state, cache);
     }
     
     pool.stop();
-    calcpool.stop();
     pool.join();
-    calcpool.join();
 }
 
 BENCHMARK(BM_cachecalc_boost_coroutine)->Unit(benchmark::kMillisecond)
