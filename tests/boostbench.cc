@@ -314,32 +314,35 @@ BENCHMARK(BM_cachecalc_semqueue)->Unit(benchmark::kMillisecond)->Range(8, 64);
 void BM_cachecalc_boost_threadpool(benchmark::State& state) {
     boost::asio::thread_pool pool(num_tasks);
     boost::asio::thread_pool calcpool(1);
-    auto strand_ = make_strand(calcpool.get_executor());
-    std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
+    auto strand_ = boost::asio::make_strand(calcpool.get_executor());
+    std::chrono::microseconds sleep_time(state.range(0));
+    
     for (auto _ : state) {
         cachetype cache;
-        std::vector<boost::future<void> > futures;
-        futures.reserve(max_iter);
-        auto fn = [&] {
-            auto f = boost::asio::post(strand_, std::packaged_task<void()>([&] {
+        std::atomic<int> completed{0};
+        std::promise<void> all_done;
+        auto done_future = all_done.get_future();
+
+        for (int i = 0; i < max_iter; i++) {
+            // Step 1: Initial calculation on the strand
+            boost::asio::post(strand_, [&, sleep_time]() {
                 calc(cache);
-            }));
-            f.wait();
-            // iotype::fake_io(sleep_time); // Don't use it is not optimized for boost
-            // Use boost asio timer to simulate sleep instead of blocking the thread. This allows other tasks to run while one is sleeping.
-            boost::asio::steady_timer timer(pool.get_executor(), sleep_time);
-            timer.wait();
-            auto f1 = boost::asio::post(strand_, std::packaged_task<void()>([&] {
-                calc(cache);
-            }));
-            f1.wait();
-        };
-        for (int i=0; i < max_iter; i++) {
-            boost::packaged_task<void()> task(fn);
-            futures.push_back(task.get_future());
-            boost::asio::post(pool, std::move(task));
+
+                // Step 2: Non-blocking simulated IO
+                auto timer = std::make_shared<boost::asio::steady_timer>(pool.get_executor(), sleep_time);
+                timer->async_wait([&, timer](auto ec) {
+                    // Step 3: Final calculation back on the strand
+                    boost::asio::post(strand_, [&]() {
+                        calc(cache);
+                        // Signal completion of the entire batch
+                        if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
+                            all_done.set_value();
+                        }
+                    });
+                });
+            });
         }
-        boost::wait_for_all(futures.begin(), futures.end());
+        done_future.wait();
         checkWork(state, cache);
     }
 }
