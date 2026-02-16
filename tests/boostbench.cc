@@ -92,10 +92,8 @@ void BM_cachecalc_boost_coroutine(benchmark::State& state) {
             calc(cache);
 
             // Switch back to pool executor for IO
-            // Return to main executor for IO to avoid serializing the wait
-            co_await boost::asio::dispatch(
-                boost::asio::bind_executor(main_executor, boost::asio::use_awaitable)
-            );
+            co_await boost::asio::post(main_executor, boost::asio::use_awaitable);
+            
             // Use an individual timer to simulate independent IO tasks
             boost::asio::steady_timer individual_timer(main_executor, sleep_time);
             co_await individual_timer.async_wait(boost::asio::use_awaitable);
