@@ -22,7 +22,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # add_definitions(-DPARALLEL)
 
 # set(CMAKE_CXX_FLAGS "-std=c++23 -stdlib=libc++ -fcoroutines-ts")
-set(CMAKE_CXX_FLAGS "-std=c++20")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -fno-omit-frame-pointer")
 enable_testing()
 
 # Optional components
