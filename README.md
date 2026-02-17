@@ -1,115 +1,130 @@
-To run benchmarks
+# EvaluateIPC
 
-In your desktop
-===============
+This repository evaluates the performance and scalability of various C++ concurrency and Inter-Process Communication (IPC) techniques. It provides a comprehensive set of benchmarks comparing the C++ Standard Library, Boost.Asio, Facebook Folly, and the Seastar framework.
 
-Go to root folder
+## Benchmark Intent: The "Cache Calc" Pattern
 
-```console
-cmake -B build -DENABLE_FOLLY=ON
-cmake --build build
-```
+The primary benchmark in this project simulates a high-concurrency scenario common in server-side applications: **serialized computation interleaved with asynchronous IO waits**.
 
-Using docker
-============
+### The Workflow
 
-From root of this repo
+Each benchmark iteration executes 1,000 tasks (default `max_iter`) with a concurrency level of 8 tasks (`num_tasks`). Each task follows this pattern:
+
+1. **Serialized Compute**: Perform a calculation on a shared resource (an `unordered_map` cache) protected by a synchronization primitive such as a mutex, strand, or shard logic.
+2. **Simulated IO**: Perform a non-blocking delay (8µs to 64µs) using asynchronous timers.
+3. **Serialized Compute**: Perform a second calculation on the same shared resource.
+
+### Why this Pattern?
+
+This pattern tests the efficiency of a framework's **context-switching** and **task-scheduling** capabilities. A high-performance framework should be able to overlap the "IO" periods of all 1,000 tasks, effectively parallelizing the wait time and ensuring the total benchmark time is dominated only by the serialized compute portions and framework overhead.
+
+---
+
+## Implementation Details
+
+* **C++ Standard Library**:
+* `BM_cachecalc_mutex`: Uses manual `std::thread` management and a shared `std::mutex`.
+* `BM_cachecalc_async`: Uses `std::async` to launch tasks, highlighting the overhead of thread creation and destruction.
+* `BM_cachecalc_simple_threadpool_class`: Uses a custom `ThreadPool` class to manage worker lifecycles via condition variables.
+
+
+* **Boost.Asio**:
+* `BM_cachecalc_boost_threadpool`: Uses `asio::thread_pool` and `asio::strand` to serialize access to the cache map.
+* `BM_cachecalc_boost_coroutine`: Utilizes C++20 coroutines (`asio::awaitable`) to switch between the main pool and the strand for calculation and IO steps.
+
+
+* **Facebook Folly**:
+* `BM_cachecalc_folly_parallel`: Leverages `folly::coro` and `StrandExecutor` to achieve high-performance asynchronous execution.
+
+
+* **Seastar**:
+* `BM_SeastarHash`: Serializes all cache access to Shard 0 using `smp::submit_to`, simulating a central coordinator.
+* `BM_SeastarShardedCacheParallel`: A scalable, shared-nothing implementation using `seastar::sharded` where data is partitioned across all available cores, eliminating the central bottleneck.
+
+
+
+---
+
+## Benchmark Results (MacBook Pro Apple M2)
+
+The following results were captured running inside a Docker container on a MacBook Pro (Apple M2, 4 shards assigned to Docker).
+
+### Boost.Asio Benchmarks (`tests/boostbench`)
+
+Boost demonstrates highly efficient scheduling, with threadpool versions performing better than coroutines in this specific workload.
+
+| Benchmark | Time | CPU | Iterations |
+| --- | --- | --- | --- |
+| `BM_cachecalc_boost_threadpool/8` | 2.54 ms | 0.106 ms | 1000 |
+| `BM_cachecalc_boost_threadpool/64` | 2.36 ms | 0.105 ms | 6962 |
+| `BM_cachecalc_boost_coroutine/8` | 4.33 ms | 0.762 ms | 789 |
+| `BM_cachecalc_boost_coroutine/64` | 5.32 ms | 0.767 ms | 916 |
+
+### Standard Mutex & Async Benchmarks (`tests/mutexbench`)
+
+The threadpool implementation significantly outperforms `std::async` by eliminating thread-spawning overhead.
+
+| Benchmark | Time | CPU | Iterations |
+| --- | --- | --- | --- |
+| `BM_cachecalc_mutex/8` | 3.65 ms | 0.159 ms | 1000 |
+| `BM_cachecalc_mutex/64` | 18.7 ms | 0.164 ms | 1000 |
+| `BM_cachecalc_async/8` | 11.7 ms | 10.4 ms | 54 |
+| `BM_cachecalc_async/64` | 25.8 ms | 13.7 ms | 57 |
+| `BM_cachecalc_simple_threadpool_class/8` | 4.11 ms | 3.84 ms | 145 |
+| `BM_cachecalc_simple_threadpool_class/64` | 21.9 ms | 19.1 ms | 36 |
+
+### Seastar Framework Benchmarks (`tests/seastar/seastar_bench`)
+
+Seastar achieves the lowest latency by bypassing kernel scheduling and utilizing a polling-based, shared-nothing architecture.
+
+| Benchmark | Time | CPU | Iterations |
+| --- | --- | --- | --- |
+| `BM_SeastarHash/8` | 1.25 ms | 1.25 ms | 561 |
+| `BM_SeastarHash/64` | 1.31 ms | 1.31 ms | 533 |
+| **`BM_SeastarShardedCacheParallel/8`** | **0.827 ms** | 0.766 ms | 870 |
+| **`BM_SeastarShardedCacheParallel/64`** | **0.871 ms** | 0.781 ms | 899 |
+
+---
+
+## How to Run
+
+### Using Docker
+
+From the root of this repository:
 
 ```console
 ./bin/rundocker --build
 ./bin/rundocker
+
 ```
 
-Inside the docker container
-
-```console
-/build# cmake -DCMAKE_BUILD_TYPE=Release /workspace
-```
-
-Or
+Inside the container:
 
 ```console
 /build# /workspace/bin/runcmakeindocker.sh
-```
-
-Then
-
-```console
 /build# make
 /build# ./tests/mutexbench
 /build# ./tests/boostbench
+/build# ./tests/seastar/seastar_bench
+
 ```
 
-etc
+### Local Development (Ubuntu)
 
-From Local Ubuntu machine
-================
-
-Run
+Ensure dependencies like `libfast-float-dev`, `libgoogle-glog-dev`, and `liburing-dev` are installed:
 
 ```console
 ./docker/cmake/install-dependencies.sh
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make
-./tests/mutexbench
-```
-
-Folly benchmark
-===============
-
-```console
-sudo apt install libfast-float-dev
-cmake -B build -DENABLE_FOLLY=ON /workspace
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_FOLLY=ON
 cmake --build build
-/build# ./tests/follybench 
-2024-07-24T21:20:05+00:00
-Running ./tests/follybench
-Run on (4 X 48 MHz CPU s)
-Load Average: 0.29, 0.12, 0.24
----------------------------------------------------------------------------
-Benchmark                                 Time             CPU   Iterations
----------------------------------------------------------------------------
-BM_cachecalc_folly_threadpool/0       0.091 ms        0.023 ms        30034
-BM_cachecalc_folly_threadpool/1       0.089 ms        0.023 ms        28378
-BM_cachecalc_folly_threadpool/8       0.088 ms        0.023 ms        29926
-BM_cachecalc_folly_threadpool/64      0.219 ms        0.024 ms        29769
-done
-```
 
-Seems great comparing it to `seastar` benchmark
-
-
-```console
-/build$ ./tests/seastar/seastar_bench 
-WARNING: unable to mbind shard memory; performance may suffer: Operation not permitted
-INFO  2024-07-24 21:27:33,514 seastar - Reactor backend: io_uring
-WARN  2024-07-24 21:27:33,520 seastar - Creation of perf_event based stall detector failed: falling back to posix timer: std::system_error (error system:1, perf_event_open() failed: Operation not permitted)
-WARNING: unable to mbind shard memory; performance may suffer: Operation not permitted
-WARN  2024-07-24 21:27:33,571 seastar - Creation of perf_event based stall detector failed: falling back to posix timer: std::system_error (error system:1, perf_event_open() failed: Operation not permitted)
-WARNING: unable to mbind shard memory; performance may suffer: Operation not permitted
-WARN  2024-07-24 21:27:33,575 seastar - Creation of perf_event based stall detector failed: falling back to posix timer: std::system_error (error system:1, perf_event_open() failed: Operation not permitted)
-WARNING: unable to mbind shard memory; performance may suffer: Operation not permitted
-WARN  2024-07-24 21:27:33,582 seastar - Creation of perf_event based stall detector failed: falling back to posix timer: std::system_error (error system:1, perf_event_open() failed: Operation not permitted)
-Running benchmarks...
-2024-07-24T21:27:33+00:00
-Running ./tests/seastar/seastar_bench
-Run on (4 X 48 MHz CPU s)
-Load Average: 0.00, 0.03, 0.15
-------------------------------------------------------------
-Benchmark                  Time             CPU   Iterations
-------------------------------------------------------------
-BM_SeastarHash/0        1.17 ms         1.17 ms          609
-BM_SeastarHash/1        1.16 ms         1.16 ms          605
-BM_SeastarHash/8        1.18 ms         1.18 ms          604
-BM_SeastarHash/64       1.23 ms         1.23 ms          569
-done
 ```
 
 ## Debugging
-Before debugging in gdb run following commands to avoid verbose log
 
-```
+Before debugging in GDB, disable verbose thread logs to keep the output readable:
+
+```gdb
 set print thread-events off
+
 ```
