@@ -14,11 +14,12 @@
 project(Folly)
 cmake_minimum_required(VERSION 3.14)
 
-set(VELOX_FOLLY_BUILD_VERSION v2025.02.10.00)
-set(VELOX_FOLLY_BUILD_SHA256_CHECKSUM
+# Example taken from VELOX but updated version
+set(FOLLY_BUILD_VERSION v2025.02.10.00)
+set(FOLLY_BUILD_SHA256_CHECKSUM
     f4a450e59f0b74d1b0b4e5c55ae38e820166c95d02f8a8a298e54a49a90aa057)
-set(VELOX_FOLLY_SOURCE_URL
-    "https://github.com/facebook/folly/releases/download/${VELOX_FOLLY_BUILD_VERSION}/folly-${VELOX_FOLLY_BUILD_VERSION}.tar.gz"
+set(FOLLY_SOURCE_URL
+    "https://github.com/facebook/folly/releases/download/${FOLLY_BUILD_VERSION}/folly-${FOLLY_BUILD_VERSION}.tar.gz"
 )
 
 # resolve_dependency_url(FOLLY)
@@ -32,8 +33,8 @@ include(FetchContent)
 
 FetchContent_Declare(
   folly
-  URL ${VELOX_FOLLY_SOURCE_URL}
-#  URL_HASH ${VELOX_FOLLY_BUILD_SHA256_CHECKSUM}
+  URL ${FOLLY_SOURCE_URL}
+#  URL_HASH ${FOLLY_BUILD_SHA256_CHECKSUM}
 #  PATCH_COMMAND git apply ${CMAKE_CURRENT_LIST_DIR}/folly-no-export.patch
 #                ${glog_patch}
                 )

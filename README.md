@@ -1,6 +1,6 @@
 # EvaluateIPC
 
-This repository evaluates the performance and scalability of various C++ concurrency and Inter-Process Communication (IPC) techniques. It provides a comprehensive set of benchmarks comparing the C++ Standard Library, Boost.Asio, Facebook Folly, and the Seastar framework.
+This repository evaluates the performance and scalability of various C++ concurrency and Inter-Process Communication (IPC) techniques. It a set of benchmarks comparing the C++ Standard Library, Boost.Asio, Facebook Folly, and the Seastar framework.
 
 ## Benchmark Intent: The "Cache Calc" Pattern
 
