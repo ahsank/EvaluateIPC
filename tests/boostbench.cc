@@ -88,18 +88,18 @@ void BM_cachecalc_boost_coroutine(benchmark::State& state) {
 
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
             // Switch to strand: resume on strand executor, then run calc
-            co_await boost::asio::post(strand_, boost::asio::use_awaitable);
+            co_await boost::asio::dispatch(strand_, boost::asio::use_awaitable);
             calc(cache);
 
             // Switch back to pool executor for IO
-            co_await boost::asio::post(main_executor, boost::asio::use_awaitable);
+            co_await boost::asio::dispatch(main_executor, boost::asio::use_awaitable);
             
             // Use an individual timer to simulate independent IO tasks
             boost::asio::steady_timer individual_timer(main_executor, sleep_time);
             co_await individual_timer.async_wait(boost::asio::use_awaitable);
 
             // Re-enter strand for the final serialized calculation
-            co_await boost::asio::post(strand_, boost::asio::use_awaitable);
+            co_await boost::asio::dispatch(strand_, boost::asio::use_awaitable);
             calc(cache);
 
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
