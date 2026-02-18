@@ -3,6 +3,9 @@ FetchContent_Declare(
   googletest
   URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
 )
+# Set the option to disable building Google Benchmark's own tests
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable Google Benchmark tests" FORCE)
+
 FetchContent_Declare(googlebenchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git
         GIT_TAG main)

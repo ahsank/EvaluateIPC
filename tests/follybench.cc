@@ -10,74 +10,53 @@
 // #include "colib.h"
 #include <iostream>
 
-using StrandContext = folly::StrandContext;
-
-folly::coro::Task<void> sleepTask(std::chrono::microseconds sleep_time) {
-    co_await folly::coro::sleep(sleep_time);
-    co_return;
-}
-
-
-template <class T>
-class MyObject {
-public:
-
-    MyObject(std::chrono::microseconds sleeptime): sleep_time(sleeptime) {
-    }
-    
-    folly::coro::Task<T> someMethod() {
-        auto currentEx = co_await folly::coro::co_current_executor;
-        auto strandEx = folly::StrandExecutor::create(strand_, currentEx);
-        co_return co_await someMethodImpl().scheduleOn(strandEx);
-    }
-
-private:
-    folly::coro::Task<T> someMethodImpl() {
-         auto start = std::chrono::high_resolution_clock::now();
-        // Safe to access otherState_ without further synchronisation.
-        modify(otherState_);
-        (void) co_await sleepTask(sleep_time);
-        auto real_duration = duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now() - start);
-        if (real_duration < sleep_time) {
-            throw std::runtime_error("Sleep not working");
-        }
-        modify(otherState_);
-        co_return otherState_;
-    }
-
-    void modify(int& val) {
-        val++;
-        calc(cache);
-    }
-    
-    std::shared_ptr<StrandContext> strand_{StrandContext::create()};
-    int otherState_{0};
-    cachetype cache;
-    std::chrono::microseconds sleep_time;
-};
-
-
-void BM_cachecalc_folly_threadpool(benchmark::State& state) {
-    // std::cout << __cpp_impl_coroutine << "," << FOLLY_HAS_COROUTINES << std::endl;
+// Future-based benchmark similar to BM_cachecalc_boost_threadpool that runs max_iter tasks
+void BM_cachecalc_folly_future_parallel(benchmark::State& state) {
     std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
-    MyObject<int> myobj(sleep_time);
-    for (auto _ : state) {
-        folly::coro::blockingWait(
-            std::move(myobj.someMethod())
-            .scheduleOn(folly::getGlobalCPUExecutor().get()));
-    }
-    
-}
-BENCHMARK(BM_cachecalc_folly_threadpool)->Unit(benchmark::kMillisecond)->Range(0, 64);
+    auto globalEx = folly::getGlobalCPUExecutor();
 
-// Benchmark similar to BM_cachecalc_boost_threadpool that runs max_iter tasks
+    for (auto _ : state) {
+        cachetype cache;
+        auto strand_ = folly::StrandContext::create();
+        // Create a strand executor to serialize access to the cache
+        auto strandEx = folly::StrandExecutor::create(strand_, globalEx);
+
+        std::vector<folly::Future<folly::Unit>> futures;
+        futures.reserve(max_iter);
+
+        for (int i = 0; i < max_iter; i++) {
+            // 1. Initial jump to the strand for the first serialized calculation
+            auto f = folly::via(strandEx.get(), [&cache] {
+                calc(cache);
+            })
+            // 2. Perform non-blocking sleep (simulated IO)
+            .thenValue([sleep_time](auto) {
+                return folly::futures::sleep(sleep_time);
+            })
+            // 3. Chain execution back to the strand for the final calculation
+            .via(strandEx.get())
+            .thenValue([&cache](auto) {
+                calc(cache);
+            });
+
+            futures.push_back(std::move(f));
+        }
+
+        // Synchronously wait for all 1,000 asynchronous chains to complete
+        folly::collectAll(futures).wait();
+        checkWork(state, cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_folly_future_parallel)->Unit(benchmark::kMillisecond)->Range(8, 64);
+
+// Coroutine-based benchmark similar to BM_cachecalc_boost_threadpool that runs max_iter tasks
 void BM_cachecalc_folly_parallel(benchmark::State& state) {
     std::chrono::microseconds sleep_time = std::chrono::microseconds(state.range(0));
     
     for (auto _ : state) {
         cachetype cache;
-        auto strand_ = StrandContext::create();
+        auto strand_ = folly::StrandContext::create();
         auto currentEx = folly::getGlobalCPUExecutor().get();
         auto strandExPtr = std::make_shared<folly::Executor::KeepAlive<>>(
             folly::StrandExecutor::create(strand_, currentEx));
@@ -90,7 +69,7 @@ void BM_cachecalc_folly_parallel(benchmark::State& state) {
             }).scheduleOn(*strandExPtr);
             
             // Simulated IO
-            co_await sleepTask(sleep_time);
+            co_await folly::coro::sleep(sleep_time);
             
             // Second calc with strand serialization
             co_await folly::coro::co_invoke([&cache]() -> folly::coro::Task<void> {
