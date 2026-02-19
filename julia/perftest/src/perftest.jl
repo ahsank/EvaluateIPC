@@ -10,6 +10,7 @@ end
 const numcalc = 10
 const maxiter = 1000
 const numtask = 8
+const start_val = 10000
 
 function calc(cache::Dict{String, String})
     for i in 1:numcalc
@@ -17,7 +18,7 @@ function calc(cache::Dict{String, String})
         if haskey(cache, key)
             cache[key] = string(parse(Int64, cache[key]) + 1)
         else
-            cache[key] = "1"
+            cache[key] = string(start_val+1)
         end
         
     end
@@ -38,17 +39,20 @@ function fakeIO(sleepus::Int64)
     end
 end
 
-Keyarr = ["Hello" * string(i) for i in 1:numcalc]
-valarr = Dict(string(i) => string(i+1) for i in 0:maxiter*2)
+# Pre-allocated keys and value mapping to avoid parse/string overhead in the optimized version
+const Keyarr = ["hello" * string(i) for i in 1:numcalc]
+const ValMap = Dict(string(i) => string(i + 1) for i in 0:maxiter * 2 + start_val)
 
-function calc1(cache::Dict{String, String})
+function calc_optimized(cache::Dict{String, String})
     for i in 1:numcalc
-        key = keyarr[i]
-        cache[key] = valarr[get(cache, key, "0")]
+        key = Keyarr[i]
+        # Avoid parse/string by using the pre-computed ValMap
+        current_val = get(cache, key, string(start_val))
+        cache[key] = ValMap[current_val]
     end
 end
 
-function checkwork(cache::Dict{String, String}, checkval::Integer=maxiter*2)::Nothing
+function checkwork(cache::Dict{String, String}, checkval::Integer=start_val + maxiter*2)::Nothing
     strcheck = string(checkval)
     for i in 1:numcalc
         str = cache[getkey(i)]
@@ -58,7 +62,6 @@ function checkwork(cache::Dict{String, String}, checkval::Integer=maxiter*2)::No
     end
 end
 
-end # module perftest
 
 function cachecalc(iotime::Int64)
     cache = Dict{String, String}()
@@ -115,3 +118,44 @@ function cachecalc_channel()
     end
     
 end
+
+function cachecalc_spawned(iotime::Int64)
+    cache = Dict{String, String}()
+    lck = ReentrantLock()
+    
+    # Use @sync and @spawn for dynamic scheduling
+    @sync for i in 1:maxiter
+        Threads.@spawn begin
+            lock(lck) do
+                calc(cache)
+            end
+            fakeIO(iotime)
+            lock(lck) do
+                calc(cache)
+            end
+        end
+    end
+    checkwork(cache)
+end
+
+function cachecalc_optimized_spawned(iotime::Int64)
+    cache = Dict{String, String}()
+    lck = ReentrantLock()
+    
+    # Use @sync and @spawn for dynamic scheduling
+    @sync for i in 1:maxiter
+        Threads.@spawn begin
+            lock(lck) do
+                calc_optimized(cache)
+            end
+            fakeIO(iotime)
+            lock(lck) do
+                calc_optimized(cache)
+            end
+        end
+    end
+    checkwork(cache)
+end
+
+
+end # module perftest
