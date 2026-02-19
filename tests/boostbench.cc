@@ -123,6 +123,101 @@ void BM_cachecalc_boost_coroutine(benchmark::State& state) {
 BENCHMARK(BM_cachecalc_boost_coroutine)->Unit(benchmark::kMillisecond)
 ->Range(8, 64);
 
+// Same as above bust executes everything in a strand
+void BM_cachecalc_boost_coroutine_strand(benchmark::State& state) {
+    std::chrono::microseconds sleep_time(state.range(0));
+
+    // 1. Move pools outside the measurement loop to avoid creation/join overhead.
+    boost::asio::thread_pool pool(1);
+    auto main_executor = pool.get_executor();
+    auto strand_ = boost::asio::make_strand(main_executor);
+
+    for (auto _ : state) {
+        cachetype cache;
+        std::atomic<int> completed{0};
+        std::promise<void> all_done;
+        auto done_future = all_done.get_future();
+
+        auto task_coro = [&]() -> boost::asio::awaitable<void> {
+            // Switch to strand: resume on strand executor, then run calc
+            calc(cache);
+          
+            // Use an individual timer to simulate independent IO tasks
+            boost::asio::steady_timer individual_timer(main_executor, sleep_time);
+            co_await individual_timer.async_wait(boost::asio::use_awaitable);
+            calc(cache);
+
+            if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
+                all_done.set_value();
+            }
+            co_return;
+        };
+
+        for (int i = 0; i < max_iter; i++) {
+            boost::asio::co_spawn(strand_, task_coro(), boost::asio::detached);
+        }
+
+        done_future.wait();
+        checkWork(state, cache);
+    }
+    
+    pool.stop();
+    pool.join();
+}
+
+BENCHMARK(BM_cachecalc_boost_coroutine_strand)->Unit(benchmark::kMillisecond)
+->Range(8, 64);
+
+// Single-threaded io_context version: runs everything on main event loop
+void BM_cachecalc_boost_coroutine_io_context(benchmark::State& state) {
+    std::chrono::microseconds sleep_time(state.range(0));
+
+    boost::asio::io_context io;
+    auto main_executor = io.get_executor();
+
+    for (auto _ : state) {
+        cachetype cache;
+        std::atomic<int> completed{0};
+        std::promise<void> all_done;
+        auto done_future = all_done.get_future();
+
+        auto task_coro = [&]() -> boost::asio::awaitable<void> {
+            // First calc
+            calc(cache);
+          
+            // Simulated IO with timer
+            boost::asio::steady_timer individual_timer(main_executor, sleep_time);
+            co_await individual_timer.async_wait(boost::asio::use_awaitable);
+            
+            // Second calc
+            calc(cache);
+
+            if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
+                all_done.set_value();
+            }
+            co_return;
+        };
+
+        // Spawn all coroutines on the io_context
+        for (int i = 0; i < max_iter; i++) {
+            boost::asio::co_spawn(main_executor, task_coro(), boost::asio::detached);
+        }
+
+        // Run the io_context until all tasks complete
+        std::thread io_thread([&]() { io.run(); });
+        done_future.wait();
+        io.stop();
+        io_thread.join();
+        
+        // Reset io_context for next iteration
+        io.restart();
+
+        checkWork(state, cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_boost_coroutine_io_context)->Unit(benchmark::kMillisecond)
+->Range(8, 64);
 
 BENCHMARK_MAIN();
 
