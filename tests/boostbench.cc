@@ -178,8 +178,6 @@ void BM_cachecalc_boost_coroutine_io_context(benchmark::State& state) {
     for (auto _ : state) {
         cachetype cache;
         std::atomic<int> completed{0};
-        std::promise<void> all_done;
-        auto done_future = all_done.get_future();
 
         auto task_coro = [&]() -> boost::asio::awaitable<void> {
             // First calc
@@ -193,7 +191,7 @@ void BM_cachecalc_boost_coroutine_io_context(benchmark::State& state) {
             calc(cache);
 
             if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == max_iter) {
-                all_done.set_value();
+                io.stop();
             }
             co_return;
         };
@@ -204,12 +202,7 @@ void BM_cachecalc_boost_coroutine_io_context(benchmark::State& state) {
         }
 
         // Run the io_context until all tasks complete
-        std::thread io_thread([&]() { io.run(); });
-        done_future.wait();
-        io.stop();
-        io_thread.join();
-        
-        // Reset io_context for next iteration
+        io.run();
         io.restart();
 
         checkWork(state, cache);

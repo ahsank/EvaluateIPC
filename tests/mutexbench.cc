@@ -44,9 +44,27 @@ void BM_sleep_devzero(benchmark::State& state) {
         iotype::fake_io(duration);
     }
 }
-
+    
 BENCHMARK(BM_sleep_devzero)->Unit(benchmark::kMicrosecond)->Range(8, 64);
 
+// A single threaded benchmark that measures time spent on calculations only without any simulated IO.
+// This serves as a baseline for the overhead of the calculations themselves without any synchronization or parallelism.
+void cache_calc_only(cachetype& cache) {
+    for (int i=0; i < max_iter; i++) {
+        calc(cache);
+        calc(cache);
+    }
+}
+
+void BM_cachecalc_only(benchmark::State& state) {
+    for (auto _ : state) {
+        cachetype cache;
+        cache_calc_only(cache);
+        checkWork(state, cache);
+    }
+}
+
+BENCHMARK(BM_cachecalc_only)->Unit(benchmark::kMillisecond);
 
 // A single threaded benchmark that performs calculations, simulates IO, and then performs more calculations on a shared cache.
 // This serves as a baseline for the overhead of the operations without any synchronization or parallelism.

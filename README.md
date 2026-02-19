@@ -34,7 +34,9 @@ This pattern tests the efficiency of a framework's **context-switching** and **t
 
 * **Boost.Asio**:
 * `BM_cachecalc_boost_threadpool`: Uses `asio::thread_pool` and `asio::strand` to serialize access to the cache map.
-* `BM_cachecalc_boost_coroutine`: Utilizes C++20 coroutines (`asio::awaitable`) to switch between the main pool and the strand for calculation and IO steps.
+* `BM_cachecalc_boost_coroutine`: Uses C++20 coroutines (`asio::awaitable`) to switch between the main pool and the strand for calculation and IO steps.
+* `BM_cachecalc_boost_coroutine_strand`: Runs both compute and simulated IO on the strand to reduce thread context switching.
+* `BM_cachecalc_boost_coroutine_io_context`: Runs everything on a single-thread `io_context` (no thread pool).
 
 
 * **Facebook Folly**:
@@ -62,10 +64,14 @@ These results show the overhead in a native environment without containerization
 
 | Benchmark | Time | CPU | Iterations |
 | --- | --- | --- | --- |
-| `BM_cachecalc_boost_threadpool/8` | 1.91 ms | 0.051 ms | 12858 |
-| `BM_cachecalc_boost_threadpool/64` | 1.89 ms | 0.047 ms | 10000 |
-| `BM_cachecalc_boost_coroutine/8` | 4.68 ms | 1.42 ms | 489 |
-| `BM_cachecalc_boost_coroutine/64` | 4.70 ms | 1.48 ms | 492 |
+| `BM_cachecalc_boost_threadpool/8` | 2.17 ms | 0.050 ms | 10000 |
+| `BM_cachecalc_boost_threadpool/64` | 2.06 ms | 0.046 ms | 10000 |
+| `BM_cachecalc_boost_coroutine/8` | 2.93 ms | 1.32 ms | 631 |
+| `BM_cachecalc_boost_coroutine/64` | 2.82 ms | 1.17 ms | 572 |
+| `BM_cachecalc_boost_coroutine_strand/8` | 2.11 ms | 0.154 ms | 4584 |
+| `BM_cachecalc_boost_coroutine_strand/64` | 2.09 ms | 0.153 ms | 4548 |
+| `BM_cachecalc_boost_coroutine_io_context/8` | 2.03 ms | 1.99 ms | 358 |
+| `BM_cachecalc_boost_coroutine_io_context/64` | 1.98 ms | 1.95 ms | 350 |
 
 #### Facebook Folly (`tests/follybench`)
 
@@ -80,12 +86,19 @@ These results show the overhead in a native environment without containerization
 
 | Benchmark | Time | CPU | Iterations |
 | --- | --- | --- | --- |
-| `BM_cachecalc_mutex/8` | 6.57 ms | 0.078 ms | 1000 |
-| `BM_cachecalc_mutex/64` | 12.7 ms | 0.082 ms | 1000 |
-| `BM_cachecalc_async/8` | 10.2 ms | 6.47 ms | 102 |
-| `BM_cachecalc_async/64` | 17.9 ms | 8.64 ms | 81 |
-| `BM_cachecalc_simple_threadpool_class/8` | 7.33 ms | 3.16 ms | 216 |
-| `BM_cachecalc_simple_threadpool_class/64` | 12.4 ms | 3.16 ms | 242 |
+| `BM_sleep/8` | 13.0 us | 1.73 us | 415551 |
+| `BM_sleep/64` | 85.0 us | 2.96 us | 100000 |
+| `BM_sleep_devzero/8` | 11.5 us | 11.5 us | 60083 |
+| `BM_sleep_devzero/64` | 66.3 us | 66.2 us | 10573 |
+| `BM_cachecalc_only` | 1.38 ms | 1.38 ms | 512 |
+| `BM_cachecalc/8` | 13.1 ms | 13.1 ms | 53 |
+| `BM_cachecalc/64` | 67.7 ms | 67.6 ms | 10 |
+| `BM_cachecalc_mutex/8` | 7.30 ms | 0.091 ms | 1000 |
+| `BM_cachecalc_mutex/64` | 13.7 ms | 0.099 ms | 1000 |
+| `BM_cachecalc_async/8` | 11.3 ms | 7.01 ms | 92 |
+| `BM_cachecalc_async/64` | 19.0 ms | 9.10 ms | 76 |
+| `BM_cachecalc_simple_threadpool_class/8` | 8.46 ms | 3.78 ms | 192 |
+| `BM_cachecalc_simple_threadpool_class/64` | 13.1 ms | 3.34 ms | 211 |
 
 ### Docker Container (Linux, 4 Cores)
 
@@ -104,10 +117,14 @@ These results show the performance characteristics when constrained to 4 shards 
 
 | Benchmark | Time | CPU | Iterations |
 | --- | --- | --- | --- |
-| `BM_cachecalc_boost_threadpool/8` | 2.56 ms | 0.107 ms | 1000 |
-| `BM_cachecalc_boost_threadpool/64` | 2.36 ms | 0.101 ms | 6915 |
-| `BM_cachecalc_boost_coroutine/8` | 4.14 ms | 0.716 ms | 959 |
-| `BM_cachecalc_boost_coroutine/64` | 5.26 ms | 0.744 ms | 1016 |
+| `BM_cachecalc_boost_threadpool/8` | 2.58 ms | 0.108 ms | 1000 |
+| `BM_cachecalc_boost_threadpool/64` | 2.33 ms | 0.102 ms | 6775 |
+| `BM_cachecalc_boost_coroutine/8` | 3.32 ms | 0.775 ms | 908 |
+| `BM_cachecalc_boost_coroutine/64` | 3.31 ms | 0.797 ms | 975 |
+| `BM_cachecalc_boost_coroutine_strand/8` | 1.83 ms | 0.239 ms | 2861 |
+| `BM_cachecalc_boost_coroutine_strand/64` | 1.84 ms | 0.240 ms | 2966 |
+| `BM_cachecalc_boost_coroutine_io_context/8` | 1.68 ms | 1.68 ms | 400 |
+| `BM_cachecalc_boost_coroutine_io_context/64` | 1.68 ms | 1.68 ms | 419 |
 
 #### Facebook Folly (`tests/follybench`)
 
@@ -122,12 +139,19 @@ These results show the performance characteristics when constrained to 4 shards 
 
 | Benchmark | Time | CPU | Iterations |
 | --- | --- | --- | --- |
-| `BM_cachecalc_mutex/8` | 3.65 ms | 0.160 ms | 1000 |
-| `BM_cachecalc_mutex/64` | 18.7 ms | 0.165 ms | 1000 |
-| `BM_cachecalc_async/8` | 11.6 ms | 10.5 ms | 56 |
-| `BM_cachecalc_async/64` | 24.2 ms | 11.9 ms | 56 |
-| `BM_cachecalc_simple_threadpool_class/8` | 3.92 ms | 3.60 ms | 189 |
-| `BM_cachecalc_simple_threadpool_class/64` | 22.5 ms | 20.3 ms | 33 |
+| `BM_sleep/8` | 86.0 us | 5.52 us | 128021 |
+| `BM_sleep/64` | 155 us | 5.78 us | 126059 |
+| `BM_sleep_devzero/8` | 9.03 us | 8.93 us | 75674 |
+| `BM_sleep_devzero/64` | 65.2 us | 65.2 us | 10784 |
+| `BM_cachecalc_only` | 1.03 ms | 1.03 ms | 673 |
+| `BM_cachecalc/8` | 10.1 ms | 10.1 ms | 68 |
+| `BM_cachecalc/64` | 66.2 ms | 66.1 ms | 11 |
+| `BM_cachecalc_mutex/8` | 4.50 ms | 0.250 ms | 1000 |
+| `BM_cachecalc_mutex/64` | 21.0 ms | 0.334 ms | 1000 |
+| `BM_cachecalc_async/8` | 14.5 ms | 12.2 ms | 48 |
+| `BM_cachecalc_async/64` | 30.9 ms | 15.7 ms | 51 |
+| `BM_cachecalc_simple_threadpool_class/8` | 5.91 ms | 5.01 ms | 150 |
+| `BM_cachecalc_simple_threadpool_class/64` | 23.7 ms | 20.0 ms | 30 |
 
 ---
 
